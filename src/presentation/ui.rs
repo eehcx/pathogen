@@ -494,7 +494,7 @@ pub fn run_tui() -> Result<(), io::Error> {
             if let Event::Key(key) = event::read()? {
                 app.clear_message();
 
-                if key.code == KeyCode::Char('q') {
+                if key.code == KeyCode::Char('q') && app.mode == AppMode::Menu {
                     break;
                 }
 
