@@ -151,6 +151,12 @@ impl AppState {
     }
 
     pub fn quarantine_ip(&mut self) {
+        use std::str::FromStr;
+        if std::net::IpAddr::from_str(&self.quarantine_ip_input).is_err() {
+            self.message = Some((true, "Dirección IP inválida".to_string()));
+            return;
+        }
+
         let req = QuarantineRequest::new(self.quarantine_ip_input.clone());
         match self.repository.quarantine_ip(req) {
             Ok(_) => {
