@@ -71,4 +71,4 @@ El código en Rust está estrictamente separado:
 ---
 
 ## ⚖️ Licencia
-Distribuido bajo licencia MIT. Úsalo bajo tu propia responsabilidad.
+Distribuido bajo licencia GNU GPLv3. Úsalo bajo tu propia responsabilidad.
