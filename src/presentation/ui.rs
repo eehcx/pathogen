@@ -7,6 +7,7 @@ use ratatui::{
     Frame, Terminal,
 };
 use std::io;
+use crossterm::event::{self, KeyCode};
 
 use crate::domain::Rule;
 use crate::presentation::app::{AppState, AppMode};
@@ -472,6 +473,198 @@ impl Ui {
     }
 }
 
+
+fn handle_menu_events(key: event::KeyEvent, app: &mut AppState) -> bool {
+    match key.code {
+        KeyCode::Up => {
+            app.menu_index = app.menu_index.saturating_sub(1);
+        }
+        KeyCode::Down => {
+            if app.menu_index < 4 { app.menu_index += 1; }
+        }
+        KeyCode::Enter => {
+            match app.menu_index {
+                0 => { app.mode = AppMode::RulesList; app.refresh_rules(); }
+                1 => { app.mode = AppMode::QuarantineList; app.refresh_quarantine(); }
+                2 => { app.mode = AppMode::RateLimitForm; }
+                3 => { app.mode = AppMode::LogsViewer; app.refresh_logs(); }
+                _ => { return true; } // Signal to quit
+            }
+        }
+        _ => {}
+    }
+    false
+}
+
+fn handle_logs_events(key: event::KeyEvent, app: &mut AppState) {
+    match key.code {
+        KeyCode::Char('m') | KeyCode::Esc => {
+            app.mode = AppMode::Menu;
+        }
+        KeyCode::Char('r') => {
+            app.refresh_logs();
+        }
+        _ => {}
+    }
+}
+
+fn handle_quarantine_events(key: event::KeyEvent, app: &mut AppState) {
+    match key.code {
+        KeyCode::Char('m') | KeyCode::Esc => {
+            if !app.show_quarantine_dialog {
+                app.mode = AppMode::Menu;
+            } else {
+                app.show_quarantine_dialog = false;
+            }
+        }
+        KeyCode::Up => {
+            if !app.show_quarantine_dialog && !app.quarantined_ips.is_empty() {
+                app.quarantine_index = app.quarantine_index.saturating_sub(1);
+            }
+        }
+        KeyCode::Down => {
+            if !app.show_quarantine_dialog && !app.quarantined_ips.is_empty() {
+                let max = app.quarantined_ips.len() - 1;
+                if app.quarantine_index < max {
+                    app.quarantine_index += 1;
+                }
+            }
+        }
+        KeyCode::Char('q') => {
+            if !app.show_quarantine_dialog {
+                app.show_quarantine_dialog = true;
+                app.quarantine_ip_input.clear();
+            }
+        }
+        KeyCode::Char('d') => {
+            if !app.show_quarantine_dialog {
+                app.remove_quarantine();
+            }
+        }
+        KeyCode::Enter => {
+            if app.show_quarantine_dialog {
+                app.quarantine_ip();
+            }
+        }
+        KeyCode::Char(c) => {
+            if app.show_quarantine_dialog {
+                if (c.is_ascii_digit() || c == '.') && app.quarantine_ip_input.len() < 15 {
+                    app.quarantine_ip_input.push(c);
+                }
+            }
+        }
+        KeyCode::Backspace => {
+            if app.show_quarantine_dialog {
+                app.quarantine_ip_input.pop();
+            }
+        }
+        _ => {}
+    }
+}
+
+fn handle_rate_limit_events(key: event::KeyEvent, app: &mut AppState) {
+    match key.code {
+        KeyCode::Char('m') | KeyCode::Esc => {
+            app.mode = AppMode::Menu;
+        }
+        KeyCode::Up => {
+            app.rl_focus = app.rl_focus.saturating_sub(1);
+        }
+        KeyCode::Down => {
+            if app.rl_focus < 1 { app.rl_focus += 1; }
+        }
+        KeyCode::Tab => {
+            app.rl_protocol = if app.rl_protocol == "tcp" { "udp".to_string() } else { "tcp".to_string() };
+        }
+        KeyCode::Char(' ') => {
+            app.rl_unit = if app.rl_unit == "second" { "minute".to_string() } else { "second".to_string() };
+        }
+        KeyCode::Enter => {
+            app.apply_rate_limit();
+        }
+        KeyCode::Char(c) => {
+            if c.is_ascii_digit() {
+                if app.rl_focus == 0 && app.rl_port_input.len() < 5 {
+                    app.rl_port_input.push(c);
+                } else if app.rl_focus == 1 && app.rl_rate_input.len() < 5 {
+                    app.rl_rate_input.push(c);
+                }
+            }
+        }
+        KeyCode::Backspace => {
+            if app.rl_focus == 0 {
+                app.rl_port_input.pop();
+            } else if app.rl_focus == 1 {
+                app.rl_rate_input.pop();
+            }
+        }
+        _ => {}
+    }
+}
+
+fn handle_rules_events(key: event::KeyEvent, app: &mut AppState) {
+    match key.code {
+        KeyCode::Char('m') | KeyCode::Esc => {
+            if !app.show_block_dialog {
+                app.mode = AppMode::Menu;
+            } else {
+                app.show_block_dialog = false;
+            }
+        }
+        KeyCode::Up => {
+            if !app.show_block_dialog && !app.rules.is_empty() {
+                app.selected_index = app.selected_index.saturating_sub(1);
+            }
+        }
+        KeyCode::Down => {
+            if !app.show_block_dialog && !app.rules.is_empty() {
+                let max = app.rules.len() - 1;
+                if app.selected_index < max {
+                    app.selected_index += 1;
+                }
+            }
+        }
+        KeyCode::Char('b') => {
+            if !app.show_block_dialog {
+                app.show_block_dialog = true;
+                app.block_port_input.clear();
+            }
+        }
+        KeyCode::Char('d') => {
+            if !app.show_block_dialog {
+                app.delete_rule();
+            }
+        }
+        KeyCode::Enter => {
+            if app.show_block_dialog {
+                app.block_port();
+            }
+        }
+        KeyCode::Char(c) => {
+            if app.show_block_dialog {
+                if c.is_ascii_digit() && app.block_port_input.len() < 5 {
+                    app.block_port_input.push(c);
+                }
+            }
+        }
+        KeyCode::Backspace => {
+            if app.show_block_dialog {
+                app.block_port_input.pop();
+            }
+        }
+        KeyCode::Tab => {
+            if app.show_block_dialog {
+                app.block_protocol = if app.block_protocol == "tcp" {
+                    "udp".to_string()
+                } else {
+                    "tcp".to_string()
+                };
+            }
+        }
+        _ => {}
+    }
+}
+
 pub fn run_tui() -> Result<(), io::Error> {
     use crossterm::{
         event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
@@ -500,190 +693,14 @@ pub fn run_tui() -> Result<(), io::Error> {
 
                 match app.mode {
                     AppMode::Menu => {
-                        match key.code {
-                            KeyCode::Up => {
-                                app.menu_index = app.menu_index.saturating_sub(1);
-                            }
-                            KeyCode::Down => {
-                                if app.menu_index < 4 { app.menu_index += 1; }
-                            }
-                            KeyCode::Enter => {
-                                match app.menu_index {
-                                    0 => { app.mode = AppMode::RulesList; app.refresh_rules(); }
-                                    1 => { app.mode = AppMode::QuarantineList; app.refresh_quarantine(); }
-                                    2 => { app.mode = AppMode::RateLimitForm; }
-                                    3 => { app.mode = AppMode::LogsViewer; app.refresh_logs(); }
-                                    _ => { break; }
-                                }
-                            }
-                            _ => {}
+                        if handle_menu_events(key, &mut app) {
+                            break;
                         }
                     },
-                    AppMode::LogsViewer => {
-                        match key.code {
-                            KeyCode::Char('m') | KeyCode::Esc => {
-                                app.mode = AppMode::Menu;
-                            }
-                            KeyCode::Char('r') => {
-                                app.refresh_logs();
-                            }
-                            _ => {}
-                        }
-                    },
-                    AppMode::QuarantineList => {
-                        match key.code {
-                            KeyCode::Char('m') | KeyCode::Esc => {
-                                if !app.show_quarantine_dialog {
-                                    app.mode = AppMode::Menu;
-                                } else {
-                                    app.show_quarantine_dialog = false;
-                                }
-                            }
-                            KeyCode::Up => {
-                                if !app.show_quarantine_dialog && !app.quarantined_ips.is_empty() {
-                                    app.quarantine_index = app.quarantine_index.saturating_sub(1);
-                                }
-                            }
-                            KeyCode::Down => {
-                                if !app.show_quarantine_dialog && !app.quarantined_ips.is_empty() {
-                                    let max = app.quarantined_ips.len() - 1;
-                                    if app.quarantine_index < max {
-                                        app.quarantine_index += 1;
-                                    }
-                                }
-                            }
-                            KeyCode::Char('q') => {
-                                if !app.show_quarantine_dialog {
-                                    app.show_quarantine_dialog = true;
-                                    app.quarantine_ip_input.clear();
-                                }
-                            }
-                            KeyCode::Char('d') => {
-                                if !app.show_quarantine_dialog {
-                                    app.remove_quarantine();
-                                }
-                            }
-                            KeyCode::Enter => {
-                                if app.show_quarantine_dialog {
-                                    app.quarantine_ip();
-                                }
-                            }
-                            KeyCode::Char(c) => {
-                                if app.show_quarantine_dialog {
-                                    if (c.is_ascii_digit() || c == '.') && app.quarantine_ip_input.len() < 15 {
-                                        app.quarantine_ip_input.push(c);
-                                    }
-                                }
-                            }
-                            KeyCode::Backspace => {
-                                if app.show_quarantine_dialog {
-                                    app.quarantine_ip_input.pop();
-                                }
-                            }
-                            _ => {}
-                        }
-                    },
-                    AppMode::RateLimitForm => {
-                        match key.code {
-                            KeyCode::Char('m') | KeyCode::Esc => {
-                                app.mode = AppMode::Menu;
-                            }
-                            KeyCode::Up => {
-                                app.rl_focus = app.rl_focus.saturating_sub(1);
-                            }
-                            KeyCode::Down => {
-                                if app.rl_focus < 1 { app.rl_focus += 1; }
-                            }
-                            KeyCode::Tab => {
-                                app.rl_protocol = if app.rl_protocol == "tcp" { "udp".to_string() } else { "tcp".to_string() };
-                            }
-                            KeyCode::Char(' ') => {
-                                app.rl_unit = if app.rl_unit == "second" { "minute".to_string() } else { "second".to_string() };
-                            }
-                            KeyCode::Enter => {
-                                app.apply_rate_limit();
-                            }
-                            KeyCode::Char(c) => {
-                                if c.is_ascii_digit() {
-                                    if app.rl_focus == 0 && app.rl_port_input.len() < 5 {
-                                        app.rl_port_input.push(c);
-                                    } else if app.rl_focus == 1 && app.rl_rate_input.len() < 5 {
-                                        app.rl_rate_input.push(c);
-                                    }
-                                }
-                            }
-                            KeyCode::Backspace => {
-                                if app.rl_focus == 0 {
-                                    app.rl_port_input.pop();
-                                } else if app.rl_focus == 1 {
-                                    app.rl_rate_input.pop();
-                                }
-                            }
-                            _ => {}
-                        }
-                    },
-                    AppMode::RulesList => {
-                        match key.code {
-                            KeyCode::Char('m') | KeyCode::Esc => {
-                                if !app.show_block_dialog {
-                                    app.mode = AppMode::Menu;
-                                } else {
-                                    app.show_block_dialog = false;
-                                }
-                            }
-                            KeyCode::Up => {
-                                if !app.show_block_dialog && !app.rules.is_empty() {
-                                    app.selected_index = app.selected_index.saturating_sub(1);
-                                }
-                            }
-                            KeyCode::Down => {
-                                if !app.show_block_dialog && !app.rules.is_empty() {
-                                    let max = app.rules.len() - 1;
-                                    if app.selected_index < max {
-                                        app.selected_index += 1;
-                                    }
-                                }
-                            }
-                            KeyCode::Char('b') => {
-                                if !app.show_block_dialog {
-                                    app.show_block_dialog = true;
-                                    app.block_port_input.clear();
-                                }
-                            }
-                            KeyCode::Char('d') => {
-                                if !app.show_block_dialog {
-                                    app.delete_rule();
-                                }
-                            }
-                            KeyCode::Enter => {
-                                if app.show_block_dialog {
-                                    app.block_port();
-                                }
-                            }
-                            KeyCode::Char(c) => {
-                                if app.show_block_dialog {
-                                    if c.is_ascii_digit() && app.block_port_input.len() < 5 {
-                                        app.block_port_input.push(c);
-                                    }
-                                }
-                            }
-                            KeyCode::Backspace => {
-                                if app.show_block_dialog {
-                                    app.block_port_input.pop();
-                                }
-                            }
-                            KeyCode::Tab => {
-                                if app.show_block_dialog {
-                                    app.block_protocol = if app.block_protocol == "tcp" {
-                                        "udp".to_string()
-                                    } else {
-                                        "tcp".to_string()
-                                    };
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
+                    AppMode::LogsViewer => handle_logs_events(key, &mut app),
+                    AppMode::QuarantineList => handle_quarantine_events(key, &mut app),
+                    AppMode::RateLimitForm => handle_rate_limit_events(key, &mut app),
+                    AppMode::RulesList => handle_rules_events(key, &mut app),
                 }
             }
         }
