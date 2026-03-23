@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 pub struct NftablesOutput {
@@ -7,6 +7,7 @@ pub struct NftablesOutput {
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
+#[allow(dead_code)]
 pub enum NftablesItem {
     RuleWrapper { rule: NftRule },
     TableWrapper { table: serde_json::Value },
@@ -16,6 +17,7 @@ pub enum NftablesItem {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct NftRule {
     pub family: String,
     pub table: String,
