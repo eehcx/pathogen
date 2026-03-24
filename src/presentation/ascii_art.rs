@@ -1,6 +1,4 @@
-use ratatui::{
-    text::{Line, Span},
-};
+use ratatui::text::Line;
 
 pub fn render_ascii_art() -> Vec<Line<'static>> {
     vec![

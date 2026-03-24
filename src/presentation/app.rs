@@ -10,6 +10,7 @@ pub enum AppMode {
     LogsViewer,
     QuarantineList,
     RateLimitForm,
+    RateLimitList,
 }
 
 /// AppState represents the application state

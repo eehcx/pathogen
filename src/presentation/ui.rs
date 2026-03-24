@@ -8,7 +8,7 @@ use ratatui::{
 use std::io;
 
 use crate::presentation::app::{AppMode, AppState};
-use crate::presentation::views::{logs, menu, quarantine, rate_limit, rules};
+use crate::presentation::views::{logs, menu, quarantine, rate_limit, rate_limit_list, rules};
 use crate::presentation::ascii_art;
 
 /// UI component for the TUI
@@ -103,6 +103,23 @@ impl Ui {
                 rate_limit::render_rate_limit_form(frame, app, chunks[1]);
                 
                 render_global_footer(frame, app, chunks[2], "[↑↓] Field  [Tab] Protocol  [Space] Unit  [Enter] Apply  [m] Menu");
+            }
+
+            AppMode::RateLimitList => {
+                let chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Length(12),
+                        Constraint::Min(0),
+                        Constraint::Length(2),
+                    ])
+                    .split(frame.area());
+
+                render_ascii_header(frame, app, chunks[0], "Traffic Control", "Manage Rate Limit Rules");
+                
+                rate_limit_list::render_rate_limit_list(frame, app, chunks[1]);
+                
+                render_global_footer(frame, app, chunks[2], "[↑↓] Navigate  [d] Delete Rule  [m] Menu");
             }
         }
 

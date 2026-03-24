@@ -42,6 +42,7 @@ pub fn render_menu(frame: &mut Frame, app: &mut AppState) {
         " Rule Configuration & Port Management",
         " IP Quarantine (Blacklist)",
         " Traffic Control (Anti-DDoS)",
+        " Manage Rate Limit Rules",
         " Log Management & Purging",
         " Terminate Session",
     ];
@@ -83,7 +84,7 @@ pub fn handle_menu_events(key: KeyEvent, app: &mut AppState) -> bool {
             app.menu_index = app.menu_index.saturating_sub(1);
         }
         crossterm::event::KeyCode::Down => {
-            if app.menu_index < 4 {
+            if app.menu_index < 5 {
                 app.menu_index += 1;
             }
         }
@@ -101,6 +102,9 @@ pub fn handle_menu_events(key: KeyEvent, app: &mut AppState) -> bool {
                     app.mode = AppMode::RateLimitForm;
                 }
                 3 => {
+                    app.mode = AppMode::RateLimitList;
+                }
+                4 => {
                     app.mode = AppMode::LogsViewer;
                     app.refresh_logs();
                 }
