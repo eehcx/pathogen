@@ -103,6 +103,7 @@ pub fn handle_menu_events(key: KeyEvent, app: &mut AppState) -> bool {
                 }
                 3 => {
                     app.mode = AppMode::RateLimitList;
+                    app.refresh_rate_limit_rules();
                 }
                 4 => {
                     app.mode = AppMode::LogsViewer;

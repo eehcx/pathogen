@@ -281,6 +281,7 @@ pub fn run_tui() -> io::Result<()> {
                     AppMode::LogsViewer => logs::handle_logs_events(key, &mut app),
                     AppMode::QuarantineList => quarantine::handle_quarantine_events(key, &mut app),
                     AppMode::RateLimitForm => rate_limit::handle_rate_limit_events(key, &mut app),
+                    AppMode::RateLimitList => rate_limit_list::handle_rate_limit_list_events(key, &mut app),
                     AppMode::RulesList => rules::handle_rules_events(key, &mut app),
                 }
             }

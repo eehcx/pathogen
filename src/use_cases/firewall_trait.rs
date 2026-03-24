@@ -33,6 +33,9 @@ pub trait FirewallRepository: Send + Sync {
     /// Get all quarantined IPs
     fn get_quarantined_ips(&self) -> Vec<String>;
 
+    /// Get all rate limit rules
+    fn get_rate_limit_rules(&self) -> Vec<String>;
+
     /// Backup the current ruleset for potential rollback
     fn backup_ruleset(&self) -> Result<(), String>;
 

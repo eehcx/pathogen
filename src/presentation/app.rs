@@ -1,5 +1,6 @@
 use crate::domain::{Rule, PortRequest, QuarantineRequest, RateLimitRequest};
 use crate::infrastructure::CliFirewallRepository;
+use crate::presentation::views::rate_limit_list::RateLimitList;
 use crate::use_cases::FirewallRepository;
 use std::time::{Instant, Duration};
 
@@ -46,6 +47,9 @@ pub struct AppState {
     // Rollback Timer state
     pub rollback_active: bool,
     pub rollback_deadline: Option<Instant>,
+    
+    // Rate limit list state
+    pub rate_limit_list: RateLimitList,
 }
 
 impl AppState {
@@ -84,6 +88,7 @@ impl AppState {
             current_table: "filter".to_string(),
             rollback_active: false,
             rollback_deadline: None,
+            rate_limit_list: RateLimitList::new(),
         };
         app.refresh_rules();
         app
@@ -132,6 +137,15 @@ impl AppState {
         self.quarantined_ips = self.repository.get_quarantined_ips();
         if self.quarantine_index >= self.quarantined_ips.len() && !self.quarantined_ips.is_empty() {
             self.quarantine_index = self.quarantined_ips.len() - 1;
+        }
+    }
+
+    pub fn refresh_rate_limit_rules(&mut self) {
+        self.rate_limit_list.rate_limits = self.repository.get_rate_limit_rules();
+        if let Some(selected) = self.rate_limit_list.state.selected() {
+            if selected >= self.rate_limit_list.rate_limits.len() && !self.rate_limit_list.rate_limits.is_empty() {
+                self.rate_limit_list.state.select(Some(self.rate_limit_list.rate_limits.len() - 1));
+            }
         }
     }
 

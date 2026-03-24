@@ -1,4 +1,4 @@
-use crate::presentation::app::AppState;
+use crate::presentation::app::{AppState, AppMode};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -90,4 +90,46 @@ pub fn render_rate_limit_list(frame: &mut Frame, app: &AppState, area: Rect) {
         .highlight_symbol(">> ");
 
     frame.render_stateful_widget(list, area, &mut app.rate_limit_list.state.clone());
+}
+
+pub fn handle_rate_limit_list_events(key: crossterm::event::KeyEvent, app: &mut AppState) {
+    use crossterm::event::KeyCode;
+    
+    match key.code {
+        KeyCode::Up => {
+            app.rate_limit_list.previous();
+        }
+        KeyCode::Down => {
+            app.rate_limit_list.next();
+        }
+        KeyCode::Char('m') | KeyCode::Esc => {
+            app.mode = AppMode::Menu;
+        }
+        KeyCode::Char('d') => {
+            // Eliminar regla seleccionada
+            if let Some(selected) = app.rate_limit_list.state.selected() {
+                if selected < app.rate_limit_list.rate_limits.len() {
+                    let rule = app.rate_limit_list.rate_limits[selected].clone();
+                    
+                    // Intentar eliminar la regla usando el repositorio
+                    match app.repository.delete_rate_limit_rule(&rule) {
+                        Ok(_) => {
+                            // Actualizar la lista localmente
+                            app.rate_limit_list.rate_limits.remove(selected);
+                            if app.rate_limit_list.rate_limits.is_empty() {
+                                app.rate_limit_list.state.select(None);
+                            } else if selected >= app.rate_limit_list.rate_limits.len() {
+                                app.rate_limit_list.state.select(Some(app.rate_limit_list.rate_limits.len() - 1));
+                            }
+                            app.message = Some("Rate limit rule deleted successfully".to_string());
+                        }
+                        Err(e) => {
+                            app.message = Some(format!("Failed to delete rule: {}", e));
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
 }
