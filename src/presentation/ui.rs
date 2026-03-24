@@ -106,7 +106,51 @@ impl Ui {
                 render_global_footer(frame, app, chunks[2], "[↑↓] Field  [Tab] Protocol  [Space] Unit  [Enter] Apply  [m] Menu");
             }
         }
+
+        if app.rollback_active {
+            render_rollback_warning(frame, app);
+        }
     }
+}
+
+fn render_rollback_warning(frame: &mut Frame, app: &AppState) {
+    use ratatui::widgets::Clear;
+    let area = frame.area();
+    
+    let popup_area = ratatui::layout::Rect::new(
+        area.width.saturating_sub(60) / 2,
+        area.height.saturating_sub(10) / 2,
+        60.min(area.width),
+        10.min(area.height),
+    );
+
+    frame.render_widget(Clear, popup_area);
+
+    let secs_left = app.rollback_deadline
+        .map(|d| d.saturating_duration_since(std::time::Instant::now()).as_secs())
+        .unwrap_or(0);
+
+    let block = Block::new()
+        .title(" WARNING: CRITICAL NETWORK CHANGES ")
+        .borders(Borders::ALL)
+        .style(Style::default().bg(Color::Black).fg(Color::Red));
+
+    let inner_area = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let text = vec![
+        Line::from(Span::styled("Changes have been applied to the firewall.", Style::default().fg(Color::White))),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("Reverting in {} seconds...", secs_left),
+            Style::default().fg(Color::Red).bold()
+        )),
+        Line::from(""),
+        Line::from(Span::styled("[ENTER] Confirm Changes    [ESC] Revert Now", Style::default().fg(Color::Yellow))),
+    ];
+
+    let paragraph = Paragraph::new(text).alignment(ratatui::layout::Alignment::Center);
+    frame.render_widget(paragraph, inner_area);
 }
 
 pub fn render_global_footer(frame: &mut Frame, app: &AppState, area: Rect, help_text: &str) {
@@ -180,10 +224,32 @@ pub fn run_tui() -> io::Result<()> {
     let mut app = AppState::new();
 
     loop {
+        // Handle rollback timeout
+        if app.rollback_active {
+            if let Some(deadline) = app.rollback_deadline {
+                if std::time::Instant::now() >= deadline {
+                    app.cancel_rollback();
+                }
+            }
+        }
+
         terminal.draw(|f| Ui::render(f, &mut app))?;
 
         if event::poll(std::time::Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
+                if app.rollback_active {
+                    match key.code {
+                        KeyCode::Enter => {
+                            app.confirm_rollback();
+                        }
+                        KeyCode::Esc => {
+                            app.cancel_rollback();
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
+
                 app.clear_message();
 
                 if key.code == KeyCode::Char('q') && app.mode == AppMode::Menu {

@@ -182,4 +182,12 @@ impl FirewallRepository for MockFirewallRepository {
     fn get_quarantined_ips(&self) -> Vec<String> {
         vec!["192.168.1.100".to_string(), "203.0.113.42".to_string()]
     }
+
+    fn backup_ruleset(&self) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn restore_ruleset(&self) -> Result<(), String> {
+        Ok(())
+    }
 }

@@ -180,4 +180,30 @@ impl FirewallRepository for CliFirewallRepository {
         }
         ips
     }
+
+    fn backup_ruleset(&self) -> Result<(), String> {
+        // Direct call to nft to backup
+        let mut cmd = Command::new("sudo");
+        cmd.arg("-n").arg("sh").arg("-c").arg("nft list ruleset > /tmp/pathogen_backup.nft");
+        let output = cmd.output()
+            .map_err(|e| format!("Failed to create backup: {}", e))?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).to_string())
+        }
+    }
+
+    fn restore_ruleset(&self) -> Result<(), String> {
+        // Direct call to nft to restore
+        let mut cmd = Command::new("sudo");
+        cmd.arg("-n").arg("nft").arg("-f").arg("/tmp/pathogen_backup.nft");
+        let output = cmd.output()
+            .map_err(|e| format!("Failed to restore backup: {}", e))?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).to_string())
+        }
+    }
 }

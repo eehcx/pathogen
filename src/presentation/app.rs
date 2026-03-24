@@ -1,6 +1,7 @@
 use crate::domain::{Rule, PortRequest, QuarantineRequest, RateLimitRequest};
 use crate::infrastructure::CliFirewallRepository;
 use crate::use_cases::FirewallRepository;
+use std::time::{Instant, Duration};
 
 #[derive(PartialEq)]
 pub enum AppMode {
@@ -40,6 +41,10 @@ pub struct AppState {
     
     pub message: Option<(bool, String)>, // (is_error, message)
     pub current_table: String,
+
+    // Rollback Timer state
+    pub rollback_active: bool,
+    pub rollback_deadline: Option<Instant>,
 }
 
 impl AppState {
@@ -76,9 +81,36 @@ impl AppState {
             rl_focus: 0,
             message: None,
             current_table: "filter".to_string(),
+            rollback_active: false,
+            rollback_deadline: None,
         };
         app.refresh_rules();
         app
+    }
+
+    pub fn start_rollback(&mut self) -> Result<(), String> {
+        self.repository.backup_ruleset()?;
+        self.rollback_active = true;
+        self.rollback_deadline = Some(Instant::now() + Duration::from_secs(30));
+        Ok(())
+    }
+
+    pub fn confirm_rollback(&mut self) {
+        self.rollback_active = false;
+        self.rollback_deadline = None;
+        self.message = Some((false, "Changes confirmed successfully.".to_string()));
+    }
+
+    pub fn cancel_rollback(&mut self) {
+        if let Err(e) = self.repository.restore_ruleset() {
+            self.message = Some((true, format!("Failed to rollback: {}", e)));
+        } else {
+            self.message = Some((false, "Reverted safely. No connection lost.".to_string()));
+        }
+        self.rollback_active = false;
+        self.rollback_deadline = None;
+        self.refresh_rules();
+        self.refresh_quarantine();
     }
 
     pub fn refresh_rules(&mut self) {
@@ -113,6 +145,11 @@ impl AppState {
             }
         };
 
+        if let Err(e) = self.start_rollback() {
+            self.message = Some((true, e));
+            return;
+        }
+
         let request = PortRequest::new(port, self.block_protocol.clone());
 
         match self.repository.block_port(request) {
@@ -124,6 +161,7 @@ impl AppState {
             }
             Err(e) => {
                 self.message = Some((true, e));
+                self.cancel_rollback();
             }
         }
     }
@@ -138,6 +176,11 @@ impl AppState {
             Err(_) => { self.message = Some((true, "Tasa inválida".to_string())); return; }
         };
 
+        if let Err(e) = self.start_rollback() {
+            self.message = Some((true, e));
+            return;
+        }
+
         let req = RateLimitRequest::new(port, self.rl_protocol.clone(), rate, self.rl_unit.clone());
         match self.repository.apply_rate_limit(req) {
             Ok(_) => {
@@ -146,7 +189,10 @@ impl AppState {
                 self.rl_rate_input = "10".to_string();
                 self.mode = AppMode::Menu;
             }
-            Err(e) => self.message = Some((true, e)),
+            Err(e) => {
+                self.message = Some((true, e));
+                self.cancel_rollback();
+            }
         }
     }
 
@@ -154,6 +200,11 @@ impl AppState {
         use std::str::FromStr;
         if std::net::IpAddr::from_str(&self.quarantine_ip_input).is_err() {
             self.message = Some((true, "Dirección IP inválida".to_string()));
+            return;
+        }
+
+        if let Err(e) = self.start_rollback() {
+            self.message = Some((true, e));
             return;
         }
 
@@ -165,27 +216,46 @@ impl AppState {
                 self.quarantine_ip_input.clear();
                 self.refresh_quarantine();
             }
-            Err(e) => self.message = Some((true, e)),
+            Err(e) => {
+                self.message = Some((true, e));
+                self.cancel_rollback();
+            }
         }
     }
 
     pub fn remove_quarantine(&mut self) {
         if self.quarantined_ips.is_empty() { return; }
-        if let Some(ip) = self.quarantined_ips.get(self.quarantine_index) {
-            let _ = self.repository.unquarantine_ip(ip);
-            self.refresh_quarantine();
-            self.message = Some((false, "IP liberada de cuarentena.".to_string()));
+        if let Some(ip) = self.quarantined_ips.get(self.quarantine_index).cloned() {
+            if let Err(e) = self.start_rollback() {
+                self.message = Some((true, e));
+                return;
+            }
+            if let Err(e) = self.repository.unquarantine_ip(&ip) {
+                self.message = Some((true, e));
+                self.cancel_rollback();
+            } else {
+                self.refresh_quarantine();
+                self.message = Some((false, "IP liberada de cuarentena.".to_string()));
+            }
         }
     }
 
     pub fn delete_rule(&mut self) {
         if self.rules.is_empty() { return; }
-        if let Some(rule) = self.rules.get(self.selected_index) {
+        if let Some(rule) = self.rules.get(self.selected_index).cloned() {
             if rule.action == crate::domain::action::Action::Drop {
                 if let Some(p) = rule.dst_port {
-                    let _ = self.repository.unblock_port(p);
-                    self.refresh_rules();
-                    self.message = Some((false, "Regla eliminada.".to_string()));
+                    if let Err(e) = self.start_rollback() {
+                        self.message = Some((true, e));
+                        return;
+                    }
+                    if let Err(e) = self.repository.unblock_port(p) {
+                        self.message = Some((true, e));
+                        self.cancel_rollback();
+                    } else {
+                        self.refresh_rules();
+                        self.message = Some((false, "Regla eliminada.".to_string()));
+                    }
                 }
             } else {
                 self.message = Some((true, "Solo se pueden eliminar bloqueos creados aquí por ahora.".to_string()));
