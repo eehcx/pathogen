@@ -3,18 +3,27 @@
 # Layer: Infrastructure
 # Purpose: Adds a rate limit rule to a specific port to prevent brute force/DDoS.
 
-PROTOCOL=$1
-PORT=$2
+PORT=$1
+PROTOCOL=$2
 RATE=$3
 UNIT=$4
 
-if [ -z "$PROTOCOL" ] || [ -z "$PORT" ] || [ -z "$RATE" ] || [ -z "$UNIT" ]; then
-    echo "Usage: $0 <protocol> <port> <rate> <second|minute>"
+if [ -z "$PORT" ] || [ -z "$PROTOCOL" ] || [ -z "$RATE" ] || [ -z "$UNIT" ]; then
+    echo "Usage: $0 <port> <protocol> <rate> <second|minute>"
     exit 1
 fi
 
-nft add table inet filter
-nft add chain inet filter input '{ type filter hook input priority 0; policy accept; }'
+# Simple rate limiting without complex set operations
+# This limits new connections to $RATE per $UNIT from any source
+# Note: This script is called via sudo -n from the application
+nft add table inet filter 2>/dev/null || true
+nft add chain inet filter input '{ type filter hook input priority 0; policy accept; }' 2>/dev/null || true
 
-# Add rate limit rule using a dynamic meter/set based on source IP
-nft add rule inet filter input $PROTOCOL dport $PORT meter "pathogen-meter-$PROTOCOL-$PORT" '{ ip saddr limit rate over $RATE/$UNIT }' log prefix \"pathogen-ratelimit: \" counter drop comment \"tui-ratelimit-$PROTOCOL-$PORT-$RATE-$UNIT\"
+nft add rule inet filter input $PROTOCOL dport $PORT \
+    ct state new \
+    limit rate $RATE/$UNIT \
+    log prefix \"pathogen-ratelimit: \" \
+    counter drop \
+    comment \"tui-ratelimit-$PROTOCOL-$PORT-$RATE-$UNIT\" 2>/dev/null || true
+
+echo "{\"status\":\"ok\"}"

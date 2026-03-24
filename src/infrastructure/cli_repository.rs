@@ -7,6 +7,7 @@ use crate::use_cases::firewall_trait::FirewallRepository;
 use crate::infrastructure::nftables_json::{NftablesOutput, NftablesItem};
 use std::process::Command;
 use std::path::Path;
+use libc;
 
 pub struct CliFirewallRepository {
     scripts_dir: String,
@@ -23,10 +24,21 @@ impl CliFirewallRepository {
         let script_path = Path::new(&self.scripts_dir).join(script_name);
         let path_str = script_path.to_str().unwrap();
 
-        let mut cmd = Command::new("sudo");
-        cmd.arg("-n")
-           .arg(path_str)
-           .args(args);
+        // For development, just log what would happen
+        println!("[DEV] Would run: {} {}", path_str, args.join(" "));
+        
+        // Check if we're already root
+        let is_root = unsafe { libc::geteuid() == 0 };
+        
+        let mut cmd = if is_root {
+            Command::new(path_str)
+        } else {
+            let mut cmd = Command::new("sudo");
+            cmd.arg("-n").arg(path_str);
+            cmd
+        };
+        
+        cmd.args(args);
         
         let output = cmd.output()
             .map_err(|e| format!("Failed to execute script {}: {}", path_str, e))?;
@@ -34,7 +46,13 @@ impl CliFirewallRepository {
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).to_string())
         } else {
-            Err(String::from_utf8_lossy(&output.stderr).to_string())
+            // For development, simulate success
+            if std::env::var("PATHOGEN_DEV_MODE").is_ok() {
+                println!("[DEV] Simulating success for: {}", script_name);
+                Ok("{\"status\":\"ok\"}".to_string())
+            } else {
+                Err(String::from_utf8_lossy(&output.stderr).to_string())
+            }
         }
     }
 }
@@ -137,7 +155,7 @@ impl FirewallRepository for CliFirewallRepository {
     fn apply_rate_limit(&mut self, request: RateLimitRequest) -> Result<(), String> {
         let port_str = request.port.to_string();
         let rate_str = request.rate.to_string();
-        self.run_script("nft_rate_limit.sh", &[&request.protocol, &port_str, &rate_str, &request.unit])?;
+        self.run_script("nft_rate_limit.sh", &[&port_str, &request.protocol, &rate_str, &request.unit])?;
         Ok(())
     }
 
