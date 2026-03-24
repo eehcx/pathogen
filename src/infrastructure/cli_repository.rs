@@ -3,6 +3,7 @@ use crate::domain::port_request::PortRequest;
 use crate::domain::quarantine::QuarantineRequest;
 use crate::domain::rate_limit::RateLimitRequest;
 use crate::domain::rule::Rule;
+use crate::infrastructure::audit_logger::AuditLogger;
 use crate::infrastructure::nftables_json::{NftablesItem, NftablesOutput};
 use crate::use_cases::firewall_trait::FirewallRepository;
 use libc;
@@ -11,12 +12,14 @@ use std::process::Command;
 
 pub struct CliFirewallRepository {
     scripts_dir: String,
+    audit_logger: AuditLogger,
 }
 
 impl CliFirewallRepository {
     pub fn new(scripts_dir: &str) -> Self {
         Self {
             scripts_dir: scripts_dir.to_string(),
+            audit_logger: AuditLogger::new(),
         }
     }
 
@@ -131,32 +134,65 @@ impl FirewallRepository for CliFirewallRepository {
 
     fn block_port(&mut self, request: PortRequest) -> Result<Rule, String> {
         if !request.is_valid() {
+            self.audit_logger.log(
+                "block_port",
+                &format!("port={}", request.port),
+                "REJECTED: invalid request",
+            );
             return Err(request
                 .validation_error()
                 .unwrap_or_else(|| "Invalid request".to_string()));
         }
 
         let port_str = request.port.to_string();
-        self.run_script("nft_block_port.sh", &[&request.protocol, &port_str])?;
-
-        Ok(Rule {
-            table: "filter".to_string(),
-            chain: "input".to_string(),
-            priority: 0,
-            action: Action::Drop,
-            protocol: request.protocol.clone(),
-            src_port: None,
-            dst_port: Some(request.port),
-            enabled: true,
-            comment: Some(format!("tui-blocked-{}-{}", request.protocol, request.port)),
-        })
+        match self.run_script("nft_block_port.sh", &[&request.protocol, &port_str]) {
+            Ok(_) => {
+                self.audit_logger.log(
+                    "block_port",
+                    &format!("protocol={} port={}", request.protocol, request.port),
+                    "SUCCESS",
+                );
+                Ok(Rule {
+                    table: "filter".to_string(),
+                    chain: "input".to_string(),
+                    priority: 0,
+                    action: Action::Drop,
+                    protocol: request.protocol.clone(),
+                    src_port: None,
+                    dst_port: Some(request.port),
+                    enabled: true,
+                    comment: Some(format!("tui-blocked-{}-{}", request.protocol, request.port)),
+                })
+            }
+            Err(e) => {
+                self.audit_logger.log(
+                    "block_port",
+                    &format!("protocol={} port={}", request.protocol, request.port),
+                    &format!("ERROR: {}", e),
+                );
+                Err(e)
+            }
+        }
     }
 
     fn unblock_port(&mut self, port: u16) -> Result<(), String> {
         let port_str = port.to_string();
-        let _ = self.run_script("nft_unblock_port.sh", &["tcp", &port_str]);
-        let _ = self.run_script("nft_unblock_port.sh", &["udp", &port_str]);
-        Ok(())
+        match self.run_script("nft_unblock_port.sh", &["tcp", &port_str]) {
+            Ok(_) => {
+                let _ = self.run_script("nft_unblock_port.sh", &["udp", &port_str]);
+                self.audit_logger
+                    .log("unblock_port", &format!("port={}", port), "SUCCESS");
+                Ok(())
+            }
+            Err(e) => {
+                self.audit_logger.log(
+                    "unblock_port",
+                    &format!("port={}", port),
+                    &format!("ERROR: {}", e),
+                );
+                Err(e)
+            }
+        }
     }
 
     fn is_port_blocked(&self, port: u16) -> bool {
@@ -177,24 +213,77 @@ impl FirewallRepository for CliFirewallRepository {
     fn apply_rate_limit(&mut self, request: RateLimitRequest) -> Result<(), String> {
         let port_str = request.port.to_string();
         let rate_str = request.rate.to_string();
-        self.run_script(
+        match self.run_script(
             "nft_rate_limit.sh",
             &[&port_str, &request.protocol, &rate_str, &request.unit],
-        )?;
-        Ok(())
+        ) {
+            Ok(_) => {
+                self.audit_logger.log(
+                    "apply_rate_limit",
+                    &format!(
+                        "port={} rate={}/{}",
+                        request.port, request.rate, request.unit
+                    ),
+                    "SUCCESS",
+                );
+                Ok(())
+            }
+            Err(e) => {
+                self.audit_logger.log(
+                    "apply_rate_limit",
+                    &format!(
+                        "port={} rate={}/{}",
+                        request.port, request.rate, request.unit
+                    ),
+                    &format!("ERROR: {}", e),
+                );
+                Err(e)
+            }
+        }
     }
 
     fn quarantine_ip(&mut self, request: QuarantineRequest) -> Result<(), String> {
         if !request.is_valid() {
+            self.audit_logger.log(
+                "quarantine_ip",
+                &format!("ip={}", request.ip),
+                "REJECTED: invalid IP",
+            );
             return Err("Dirección IP inválida".to_string());
         }
-        self.run_script("nft_quarantine_ip.sh", &[&request.ip])?;
-        Ok(())
+        match self.run_script("nft_quarantine_ip.sh", &[&request.ip]) {
+            Ok(_) => {
+                self.audit_logger
+                    .log("quarantine_ip", &format!("ip={}", request.ip), "SUCCESS");
+                Ok(())
+            }
+            Err(e) => {
+                self.audit_logger.log(
+                    "quarantine_ip",
+                    &format!("ip={}", request.ip),
+                    &format!("ERROR: {}", e),
+                );
+                Err(e)
+            }
+        }
     }
 
     fn unquarantine_ip(&mut self, ip: &str) -> Result<(), String> {
-        self.run_script("nft_unquarantine_ip.sh", &[ip])?;
-        Ok(())
+        match self.run_script("nft_unquarantine_ip.sh", &[ip]) {
+            Ok(_) => {
+                self.audit_logger
+                    .log("unquarantine_ip", &format!("ip={}", ip), "SUCCESS");
+                Ok(())
+            }
+            Err(e) => {
+                self.audit_logger.log(
+                    "unquarantine_ip",
+                    &format!("ip={}", ip),
+                    &format!("ERROR: {}", e),
+                );
+                Err(e)
+            }
+        }
     }
 
     fn get_quarantined_ips(&self) -> Vec<String> {
