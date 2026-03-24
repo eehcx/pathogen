@@ -1,13 +1,13 @@
-use crate::domain::rule::Rule;
 use crate::domain::action::Action;
 use crate::domain::port_request::PortRequest;
-use crate::domain::rate_limit::RateLimitRequest;
 use crate::domain::quarantine::QuarantineRequest;
+use crate::domain::rate_limit::RateLimitRequest;
+use crate::domain::rule::Rule;
+use crate::infrastructure::nftables_json::{NftablesItem, NftablesOutput};
 use crate::use_cases::firewall_trait::FirewallRepository;
-use crate::infrastructure::nftables_json::{NftablesOutput, NftablesItem};
-use std::process::Command;
-use std::path::Path;
 use libc;
+use std::path::Path;
+use std::process::Command;
 
 pub struct CliFirewallRepository {
     scripts_dir: String,
@@ -24,12 +24,9 @@ impl CliFirewallRepository {
         let script_path = Path::new(&self.scripts_dir).join(script_name);
         let path_str = script_path.to_str().unwrap();
 
-        // For development, just log what would happen
-        println!("[DEV] Would run: {} {}", path_str, args.join(" "));
-        
         // Check if we're already root
         let is_root = unsafe { libc::geteuid() == 0 };
-        
+
         let mut cmd = if is_root {
             Command::new(path_str)
         } else {
@@ -37,48 +34,68 @@ impl CliFirewallRepository {
             cmd.arg("-n").arg(path_str);
             cmd
         };
-        
+
         cmd.args(args);
-        
-        let output = cmd.output()
+
+        let output = cmd
+            .output()
             .map_err(|e| format!("Failed to execute script {}: {}", path_str, e))?;
 
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).to_string())
         } else {
-            // For development, simulate success
-            if std::env::var("PATHOGEN_DEV_MODE").is_ok() {
-                println!("[DEV] Simulating success for: {}", script_name);
-                Ok("{\"status\":\"ok\"}".to_string())
-            } else {
-                Err(String::from_utf8_lossy(&output.stderr).to_string())
+            Err(String::from_utf8_lossy(&output.stderr).to_string())
+        }
+    }
+}
+
+impl CliFirewallRepository {
+    fn parse_action_from_expr(expr: &[serde_json::Value]) -> Action {
+        for e in expr.iter().rev() {
+            if let Some(verdict) = e.get("verdict") {
+                if let Some(verdict_str) = verdict.as_str() {
+                    match verdict_str {
+                        "drop" => return Action::Drop,
+                        "accept" => return Action::Accept,
+                        _ => {}
+                    }
+                }
             }
         }
+        Action::Accept
     }
 }
 
 impl FirewallRepository for CliFirewallRepository {
     fn get_all_rules(&self) -> Vec<Rule> {
-        let json_output = self.run_script("nft_list_rules.sh", &[]).unwrap_or_default();
+        let json_output = self
+            .run_script("nft_list_rules.sh", &[])
+            .unwrap_or_default();
+
         let mut parsed_rules = Vec::new();
+
+        if json_output.is_empty() {
+            return parsed_rules;
+        }
 
         if let Ok(parsed) = serde_json::from_str::<NftablesOutput>(&json_output) {
             for item in parsed.nftables {
-                if let NftablesItem::RuleWrapper { rule } = item {
-                    let mut is_drop = false;
+                if let NftablesItem::Rule { rule } = item {
+                    // Skip rate limit rules - they belong in traffic control
+                    if let Some(ref comment) = rule.comment {
+                        if comment.starts_with("tui-ratelimit-") {
+                            continue;
+                        }
+                    }
+
+                    let action = Self::parse_action_from_expr(&rule.expr);
+
                     let mut protocol = "tcp".to_string();
                     let mut port: Option<u16> = None;
 
+                    // Extract port from tui-blocked-* comments
                     if let Some(ref comment) = rule.comment {
                         if comment.starts_with("tui-blocked-") {
-                            is_drop = true;
-                            let parts: Vec<&str> = comment.split('-').collect();
-                            if parts.len() >= 4 {
-                                protocol = parts[2].to_string();
-                                port = parts[3].parse::<u16>().ok();
-                            }
-                        } else if comment.starts_with("tui-ratelimit-") {
-                            is_drop = true;
                             let parts: Vec<&str> = comment.split('-').collect();
                             if parts.len() >= 4 {
                                 protocol = parts[2].to_string();
@@ -86,8 +103,6 @@ impl FirewallRepository for CliFirewallRepository {
                             }
                         }
                     }
-
-                    let action = if is_drop { Action::Drop } else { Action::Accept };
 
                     let domain_rule = Rule {
                         table: rule.table.clone(),
@@ -104,22 +119,26 @@ impl FirewallRepository for CliFirewallRepository {
                 }
             }
         }
-        
+
         parsed_rules
     }
 
-    fn get_rules_by_table(&self, table: &str) -> Vec<Rule> {
-        self.get_all_rules().into_iter().filter(|r| r.table == table).collect()
+    fn get_rules_by_table(&self, _table: &str) -> Vec<Rule> {
+        // Return all rules - don't filter by table for maximum compatibility
+        // with different nftables setups (firewalld, custom tables, etc.)
+        self.get_all_rules()
     }
 
     fn block_port(&mut self, request: PortRequest) -> Result<Rule, String> {
         if !request.is_valid() {
-            return Err(request.validation_error().unwrap_or_else(|| "Invalid request".to_string()));
+            return Err(request
+                .validation_error()
+                .unwrap_or_else(|| "Invalid request".to_string()));
         }
 
         let port_str = request.port.to_string();
         self.run_script("nft_block_port.sh", &[&request.protocol, &port_str])?;
-        
+
         Ok(Rule {
             table: "filter".to_string(),
             chain: "input".to_string(),
@@ -141,12 +160,15 @@ impl FirewallRepository for CliFirewallRepository {
     }
 
     fn is_port_blocked(&self, port: u16) -> bool {
-        self.get_all_rules().into_iter().any(|r| r.dst_port == Some(port) && r.action == Action::Drop)
+        self.get_all_rules()
+            .into_iter()
+            .any(|r| r.dst_port == Some(port) && r.action == Action::Drop)
     }
 
     fn get_logs(&self) -> Vec<String> {
         let output = self.run_script("nft_get_logs.sh", &[]).unwrap_or_default();
-        output.lines()
+        output
+            .lines()
             .map(|s| s.to_string())
             .filter(|s| !s.trim().is_empty())
             .collect()
@@ -155,7 +177,10 @@ impl FirewallRepository for CliFirewallRepository {
     fn apply_rate_limit(&mut self, request: RateLimitRequest) -> Result<(), String> {
         let port_str = request.port.to_string();
         let rate_str = request.rate.to_string();
-        self.run_script("nft_rate_limit.sh", &[&port_str, &request.protocol, &rate_str, &request.unit])?;
+        self.run_script(
+            "nft_rate_limit.sh",
+            &[&port_str, &request.protocol, &rate_str, &request.unit],
+        )?;
         Ok(())
     }
 
@@ -173,21 +198,24 @@ impl FirewallRepository for CliFirewallRepository {
     }
 
     fn get_quarantined_ips(&self) -> Vec<String> {
-        let output = self.run_script("nft_list_quarantine.sh", &[]).unwrap_or_default();
+        let output = self
+            .run_script("nft_list_quarantine.sh", &[])
+            .unwrap_or_default();
         let mut ips = Vec::new();
 
         if let Ok(parsed) = serde_json::from_str::<NftablesOutput>(&output) {
             for item in parsed.nftables {
-                // Parsing the set elements natively can be tricky, 
-                // but we can extract them from the JSON.
-                // We will implement a simplified extractor or rely on the JSON shape.
                 if let NftablesItem::Unknown(val) = item {
                     if let Some(set) = val.get("set") {
-                        if set.get("name").and_then(|n| n.as_str()) == Some("pathogen_quarantine") {
-                            if let Some(elem) = set.get("elem").and_then(|e| e.as_array()) {
-                                for e in elem {
-                                    if let Some(ip) = e.as_str() {
-                                        ips.push(ip.to_string());
+                        if let Some(set_obj) = set.as_object() {
+                            if set_obj.get("name").and_then(|n| n.as_str())
+                                == Some("pathogen_quarantine")
+                            {
+                                if let Some(elem) = set_obj.get("elem").and_then(|e| e.as_array()) {
+                                    for e in elem {
+                                        if let Some(ip) = e.as_str() {
+                                            ips.push(ip.to_string());
+                                        }
                                     }
                                 }
                             }
@@ -200,34 +228,45 @@ impl FirewallRepository for CliFirewallRepository {
     }
 
     fn backup_ruleset(&self) -> Result<(), String> {
-        // Direct call to nft to backup
         let mut cmd = Command::new("sudo");
-        cmd.arg("-n").arg("sh").arg("-c").arg("nft list ruleset > /tmp/pathogen_backup.nft");
-        let output = cmd.output()
+        cmd.arg("-n")
+            .arg("sh")
+            .arg("-c")
+            .arg("nft list ruleset > /tmp/pathogen_backup.nft");
+        let output = cmd
+            .output()
             .map_err(|e| format!("Failed to create backup: {}", e))?;
         if output.status.success() {
             Ok(())
         } else {
-            Err(format!("Backup failed: {}", String::from_utf8_lossy(&output.stderr)))
+            Err(format!(
+                "Backup failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ))
         }
     }
 
     fn restore_ruleset(&self) -> Result<(), String> {
-        // Ejecutamos flush ruleset y luego cargamos el archivo de backup en un script atómico
         let mut cmd = Command::new("sudo");
-        cmd.arg("-n").arg("sh").arg("-c").arg("nft flush ruleset && nft -f /tmp/pathogen_backup.nft");
-        let output = cmd.output()
+        cmd.arg("-n")
+            .arg("sh")
+            .arg("-c")
+            .arg("nft flush ruleset && nft -f /tmp/pathogen_backup.nft");
+        let output = cmd
+            .output()
             .map_err(|e| format!("Failed to restore backup: {}", e))?;
-            
+
         if output.status.success() {
             Ok(())
         } else {
-            Err(format!("Restore failed: {}", String::from_utf8_lossy(&output.stderr)))
+            Err(format!(
+                "Restore failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ))
         }
     }
 
     fn get_rate_limit_rules(&self) -> Vec<String> {
-        // Ejecutar nft list ruleset y filtrar reglas de rate limit
         let output = match Command::new("sudo")
             .args(["nft", "list", "ruleset"])
             .output()
@@ -242,8 +281,7 @@ impl FirewallRepository for CliFirewallRepository {
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let mut rules = Vec::new();
-        
-        // Buscar reglas que contengan "limit rate" o "meter"
+
         for line in stdout.lines() {
             if line.contains("limit rate") || line.contains("meter") {
                 rules.push(line.trim().to_string());
@@ -258,7 +296,6 @@ impl FirewallRepository for CliFirewallRepository {
     }
 
     fn delete_rate_limit_rule(&self, rule: &str) -> Result<(), String> {
-        // Extraer el handle de la regla (último número entre corchetes)
         let handle = rule
             .split_whitespace()
             .find(|part| part.starts_with('#'))
@@ -269,7 +306,6 @@ impl FirewallRepository for CliFirewallRepository {
             return Err("Could not extract rule handle".to_string());
         }
 
-        // Eliminar la regla usando su handle
         let output = Command::new("sudo")
             .args(["nft", "delete", "rule", "filter", "input", "handle", handle])
             .output()

@@ -1,18 +1,17 @@
 use crossterm::event::KeyEvent;
 use ratatui::{
-    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Style},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
+    Frame,
 };
 
 use crate::domain::Rule;
 use crate::presentation::app::{AppMode, AppState};
 
-/// Lista de reglas
+/// Lista de reglas con scroll
 pub fn render_rules_list(frame: &mut Frame, app: &mut AppState, area: Rect) {
     let rules = app.get_rules();
-    let selected_index = app.selected_index;
 
     if rules.is_empty() {
         let block = Block::new()
@@ -32,10 +31,14 @@ pub fn render_rules_list(frame: &mut Frame, app: &mut AppState, area: Rect) {
         .iter()
         .enumerate()
         .map(|(i, rule)| {
-            let (prefix, style) = if i == selected_index {
+            // Get selected from state
+            let is_selected = app.rules_state.selected() == Some(i);
+            let (prefix, style) = if is_selected {
                 (
                     ">> ",
-                    Style::default().fg(Color::Cyan).add_modifier(ratatui::style::Modifier::REVERSED),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(ratatui::style::Modifier::REVERSED),
                 )
             } else {
                 ("   ", Style::default().fg(Color::White))
@@ -46,9 +49,20 @@ pub fn render_rules_list(frame: &mut Frame, app: &mut AppState, area: Rect) {
         })
         .collect();
 
-    let list = List::new(items).block(Block::new().borders(Borders::ALL).style(Style::default().fg(Color::DarkGray)));
+    let list = List::new(items)
+        .block(
+            Block::new()
+                .borders(Borders::ALL)
+                .style(Style::default().fg(Color::DarkGray)),
+        )
+        .highlight_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(ratatui::style::Modifier::REVERSED),
+        );
 
-    frame.render_widget(list, area);
+    // Use stateful widget for scrolling
+    frame.render_stateful_widget(list, area, &mut app.rules_state);
 }
 
 /// Formatea una regla para mostrar
@@ -114,8 +128,8 @@ pub fn render_block_dialog(frame: &mut Frame, app: &AppState) {
         ])
         .split(inner_area);
 
-    let instructions = Paragraph::new("Enter the port number (1-65535):")
-        .style(Style::default().fg(Color::White));
+    let instructions =
+        Paragraph::new("Enter the port number (1-65535):").style(Style::default().fg(Color::White));
     frame.render_widget(instructions, chunks[0]);
 
     let port_text = if app.block_port_input.is_empty() {
@@ -125,7 +139,11 @@ pub fn render_block_dialog(frame: &mut Frame, app: &AppState) {
     };
     let port_display = Paragraph::new(format!(" {} ", port_text))
         .block(Block::new().borders(Borders::ALL).title(" Port "))
-        .style(Style::default().fg(Color::Cyan).add_modifier(ratatui::style::Modifier::REVERSED));
+        .style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(ratatui::style::Modifier::REVERSED),
+        );
     frame.render_widget(port_display, chunks[1]);
 
     let protocol_text = if app.block_protocol == "tcp" {
@@ -134,16 +152,12 @@ pub fn render_block_dialog(frame: &mut Frame, app: &AppState) {
         "TCP [UDP]"
     };
     let protocol_display = Paragraph::new(format!(" {} ", protocol_text))
-        .block(
-            Block::new()
-                .borders(Borders::ALL)
-                .title(" Protocol (Tab) "),
-        )
+        .block(Block::new().borders(Borders::ALL).title(" Protocol (Tab) "))
         .style(Style::default().fg(Color::White));
     frame.render_widget(protocol_display, chunks[2]);
 }
 
-/// Maneja eventos de la vista de reglas
+/// Maneja eventos de la vista de reglas (incluyendo scroll)
 pub fn handle_rules_events(key: KeyEvent, app: &mut AppState) {
     match key.code {
         crossterm::event::KeyCode::Char('m') | crossterm::event::KeyCode::Esc => {
@@ -153,17 +167,59 @@ pub fn handle_rules_events(key: KeyEvent, app: &mut AppState) {
                 app.show_block_dialog = false;
             }
         }
-        crossterm::event::KeyCode::Up => {
-            if !app.show_block_dialog && !app.rules.is_empty() {
-                app.selected_index = app.selected_index.saturating_sub(1);
-            }
-        }
+        // Scroll down
         crossterm::event::KeyCode::Down => {
             if !app.show_block_dialog && !app.rules.is_empty() {
-                let max = app.rules.len() - 1;
-                if app.selected_index < max {
-                    app.selected_index += 1;
+                if let Some(selected) = app.rules_state.selected() {
+                    if selected < app.rules.len() - 1 {
+                        app.rules_state.select(Some(selected + 1));
+                    }
                 }
+            }
+        }
+        // Scroll up
+        crossterm::event::KeyCode::Up => {
+            if !app.show_block_dialog && !app.rules.is_empty() {
+                if let Some(selected) = app.rules_state.selected() {
+                    if selected > 0 {
+                        app.rules_state.select(Some(selected - 1));
+                    }
+                }
+            }
+        }
+        // Page down (scroll by page)
+        crossterm::event::KeyCode::PageDown => {
+            if !app.show_block_dialog && !app.rules.is_empty() {
+                let page_size = 10;
+                if let Some(selected) = app.rules_state.selected() {
+                    let new_pos = (selected + page_size).min(app.rules.len() - 1);
+                    app.rules_state.select(Some(new_pos));
+                }
+            }
+        }
+        // Page up (scroll by page)
+        crossterm::event::KeyCode::PageUp => {
+            if !app.show_block_dialog && !app.rules.is_empty() {
+                let page_size = 10;
+                if let Some(selected) = app.rules_state.selected() {
+                    if selected >= page_size {
+                        app.rules_state.select(Some(selected - page_size));
+                    } else {
+                        app.rules_state.select(Some(0));
+                    }
+                }
+            }
+        }
+        // Go to top
+        crossterm::event::KeyCode::Home => {
+            if !app.show_block_dialog && !app.rules.is_empty() {
+                app.rules_state.select(Some(0));
+            }
+        }
+        // Go to bottom
+        crossterm::event::KeyCode::End => {
+            if !app.show_block_dialog && !app.rules.is_empty() {
+                app.rules_state.select(Some(app.rules.len() - 1));
             }
         }
         crossterm::event::KeyCode::Char('b') => {

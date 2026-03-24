@@ -1,8 +1,9 @@
-use crate::domain::{Rule, PortRequest, QuarantineRequest, RateLimitRequest};
+use crate::domain::{PortRequest, QuarantineRequest, RateLimitRequest, Rule};
 use crate::infrastructure::CliFirewallRepository;
-use crate::presentation::views::rate_limit_list::RateLimitList;
+use crate::presentation::views::rate_limit::RateLimitList;
 use crate::use_cases::FirewallRepository;
-use std::time::{Instant, Duration};
+use ratatui::widgets::ListState;
+use std::time::{Duration, Instant};
 
 #[derive(PartialEq)]
 pub enum AppMode {
@@ -10,46 +11,46 @@ pub enum AppMode {
     RulesList,
     LogsViewer,
     QuarantineList,
-    RateLimitForm,
-    RateLimitList,
+    RateLimit,
 }
 
 /// AppState represents the application state
 pub struct AppState {
+    pub rate_limit_list: RateLimitList,
     pub repository: CliFirewallRepository,
     pub mode: AppMode,
     pub rules: Vec<Rule>,
+    pub rules_state: ListState, // State for scrollable rules list
     pub logs: Vec<String>,
     pub quarantined_ips: Vec<String>,
     pub selected_index: usize,
     pub menu_index: usize,
     pub log_scroll: usize,
     pub quarantine_index: usize,
-    
+
     // UI Dialogs State
     pub show_block_dialog: bool,
     pub block_port_input: String,
     pub block_protocol: String,
-    
+
     pub show_quarantine_dialog: bool,
     pub quarantine_ip_input: String,
-    
+
+    pub show_rate_limit_dialog: bool,
+
     // Rate limit form state
     pub rl_port_input: String,
     pub rl_protocol: String,
     pub rl_rate_input: String,
     pub rl_unit: String,
     pub rl_focus: usize, // 0: port, 1: rate
-    
+
     pub message: Option<(bool, String)>, // (is_error, message)
     pub current_table: String,
 
     // Rollback Timer state
     pub rollback_active: bool,
     pub rollback_deadline: Option<Instant>,
-    
-    // Rate limit list state
-    pub rate_limit_list: RateLimitList,
 }
 
 impl AppState {
@@ -68,6 +69,7 @@ impl AppState {
             repository: CliFirewallRepository::new(scripts_path),
             mode: AppMode::Menu,
             rules: Vec::new(),
+            rules_state: ListState::default(),
             logs: Vec::new(),
             quarantined_ips: Vec::new(),
             selected_index: 0,
@@ -79,6 +81,7 @@ impl AppState {
             block_protocol: "tcp".to_string(),
             show_quarantine_dialog: false,
             quarantine_ip_input: String::new(),
+            show_rate_limit_dialog: false,
             rl_port_input: String::new(),
             rl_protocol: "tcp".to_string(),
             rl_rate_input: "10".to_string(),
@@ -126,6 +129,10 @@ impl AppState {
         if self.selected_index >= self.rules.len() && !self.rules.is_empty() {
             self.selected_index = self.rules.len() - 1;
         }
+        // Initialize rules_state for scroll
+        if !self.rules.is_empty() {
+            self.rules_state.select(Some(0));
+        }
     }
 
     pub fn refresh_logs(&mut self) {
@@ -143,8 +150,12 @@ impl AppState {
     pub fn refresh_rate_limit_rules(&mut self) {
         self.rate_limit_list.rate_limits = self.repository.get_rate_limit_rules();
         if let Some(selected) = self.rate_limit_list.state.selected() {
-            if selected >= self.rate_limit_list.rate_limits.len() && !self.rate_limit_list.rate_limits.is_empty() {
-                self.rate_limit_list.state.select(Some(self.rate_limit_list.rate_limits.len() - 1));
+            if selected >= self.rate_limit_list.rate_limits.len()
+                && !self.rate_limit_list.rate_limits.is_empty()
+            {
+                self.rate_limit_list
+                    .state
+                    .select(Some(self.rate_limit_list.rate_limits.len() - 1));
             }
         }
     }
@@ -186,11 +197,17 @@ impl AppState {
     pub fn apply_rate_limit(&mut self) {
         let port: u16 = match self.rl_port_input.parse() {
             Ok(p) => p,
-            Err(_) => { self.message = Some((true, "Puerto inválido".to_string())); return; }
+            Err(_) => {
+                self.message = Some((true, "Puerto inválido".to_string()));
+                return;
+            }
         };
         let rate: u32 = match self.rl_rate_input.parse() {
             Ok(r) => r,
-            Err(_) => { self.message = Some((true, "Tasa inválida".to_string())); return; }
+            Err(_) => {
+                self.message = Some((true, "Tasa inválida".to_string()));
+                return;
+            }
         };
 
         if let Err(e) = self.start_rollback() {
@@ -204,7 +221,8 @@ impl AppState {
                 self.message = Some((false, format!("Límite aplicado a {}", port)));
                 self.rl_port_input.clear();
                 self.rl_rate_input = "10".to_string();
-                self.mode = AppMode::Menu;
+                self.show_rate_limit_dialog = false;
+                self.refresh_rate_limit_rules();
             }
             Err(e) => {
                 self.message = Some((true, e));
@@ -228,7 +246,10 @@ impl AppState {
         let req = QuarantineRequest::new(self.quarantine_ip_input.clone());
         match self.repository.quarantine_ip(req) {
             Ok(_) => {
-                self.message = Some((false, format!("IP {} en cuarentena", self.quarantine_ip_input)));
+                self.message = Some((
+                    false,
+                    format!("IP {} en cuarentena", self.quarantine_ip_input),
+                ));
                 self.show_quarantine_dialog = false;
                 self.quarantine_ip_input.clear();
                 self.refresh_quarantine();
@@ -241,7 +262,9 @@ impl AppState {
     }
 
     pub fn remove_quarantine(&mut self) {
-        if self.quarantined_ips.is_empty() { return; }
+        if self.quarantined_ips.is_empty() {
+            return;
+        }
         if let Some(ip) = self.quarantined_ips.get(self.quarantine_index).cloned() {
             if let Err(e) = self.start_rollback() {
                 self.message = Some((true, e));
@@ -258,24 +281,32 @@ impl AppState {
     }
 
     pub fn delete_rule(&mut self) {
-        if self.rules.is_empty() { return; }
-        if let Some(rule) = self.rules.get(self.selected_index).cloned() {
-            if rule.action == crate::domain::action::Action::Drop {
-                if let Some(p) = rule.dst_port {
-                    if let Err(e) = self.start_rollback() {
-                        self.message = Some((true, e));
-                        return;
+        if self.rules.is_empty() {
+            return;
+        }
+        // Use rules_state for deletion
+        if let Some(selected) = self.rules_state.selected() {
+            if let Some(rule) = self.rules.get(selected).cloned() {
+                if rule.action == crate::domain::action::Action::Drop {
+                    if let Some(p) = rule.dst_port {
+                        if let Err(e) = self.start_rollback() {
+                            self.message = Some((true, e));
+                            return;
+                        }
+                        if let Err(e) = self.repository.unblock_port(p) {
+                            self.message = Some((true, e));
+                            self.cancel_rollback();
+                        } else {
+                            self.refresh_rules();
+                            self.message = Some((false, "Regla eliminada.".to_string()));
+                        }
                     }
-                    if let Err(e) = self.repository.unblock_port(p) {
-                        self.message = Some((true, e));
-                        self.cancel_rollback();
-                    } else {
-                        self.refresh_rules();
-                        self.message = Some((false, "Regla eliminada.".to_string()));
-                    }
+                } else {
+                    self.message = Some((
+                        true,
+                        "Solo se pueden eliminar bloqueos creados aquí por ahora.".to_string(),
+                    ));
                 }
-            } else {
-                self.message = Some((true, "Solo se pueden eliminar bloqueos creados aquí por ahora.".to_string()));
             }
         }
     }
