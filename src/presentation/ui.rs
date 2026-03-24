@@ -1,6 +1,6 @@
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
     prelude::Stylize,
     style::{Color, Style},
     text::{Line, Span},
@@ -27,13 +27,19 @@ impl Ui {
                     .constraints([
                         Constraint::Length(12),
                         Constraint::Min(0),
-                        Constraint::Length(3),
+                        Constraint::Length(2),
                     ])
                     .split(frame.area());
 
                 render_ascii_header(frame, app, chunks[0], "Rules Management", "View and manage firewall rules");
                 rules::render_rules_list(frame, app, chunks[1]);
-                rules::render_footer(frame, app, chunks[2]);
+                
+                let help = if app.show_block_dialog {
+                    "[Enter] Confirm  [Esc] Cancel"
+                } else {
+                    "[↑↓] Navigate  [b] Block Port  [d] Delete Rule  [m] Menu  [q] Exit"
+                };
+                render_global_footer(frame, app, chunks[2], help);
 
                 if app.show_block_dialog {
                     rules::render_block_dialog(frame, app);
@@ -46,7 +52,7 @@ impl Ui {
                     .constraints([
                         Constraint::Length(12),
                         Constraint::Min(0),
-                        Constraint::Length(3),
+                        Constraint::Length(2),
                     ])
                     .split(frame.area());
 
@@ -54,10 +60,7 @@ impl Ui {
 
                 logs::render_logs_list(frame, app, chunks[1]);
 
-                let paragraph = Paragraph::new(" ↑↓: Navigate | r: Refresh | m: Menu | q: exit ")
-                    .block(Block::new().borders(Borders::ALL))
-                    .style(Style::default().fg(Color::DarkGray));
-                frame.render_widget(paragraph, chunks[2]);
+                render_global_footer(frame, app, chunks[2], "[↑↓] Navigate  [r] Refresh  [m] Menu  [q] Exit");
             }
 
             AppMode::QuarantineList => {
@@ -66,7 +69,7 @@ impl Ui {
                     .constraints([
                         Constraint::Length(12),
                         Constraint::Min(0),
-                        Constraint::Length(3),
+                        Constraint::Length(2),
                     ])
                     .split(frame.area());
 
@@ -74,27 +77,12 @@ impl Ui {
 
                 quarantine::render_quarantine_list(frame, app, chunks[1]);
 
-                let footer = if app.show_quarantine_dialog {
-                    " Enter: to confirm | Esc: cancel "
+                let help = if app.show_quarantine_dialog {
+                    "[Enter] Confirm  [Esc] Cancel"
                 } else {
-                    " ↑↓: Navigate | q: New IP address | d: Delete IP address | m: Menu "
+                    "[↑↓] Navigate  [q] Quarantine IP  [d] Delete IP  [m] Menu"
                 };
-
-                let msg = if let Some((is_error, msg)) = &app.message {
-                    if *is_error {
-                        Span::raw(msg.as_str()).fg(Color::Red)
-                    } else {
-                        Span::raw(msg.as_str()).fg(Color::Green)
-                    }
-                } else {
-                    Span::raw("")
-                };
-
-                let paragraph =
-                    Paragraph::new(Line::from(vec![Span::raw(footer), Span::raw(" | "), msg]))
-                        .block(Block::new().borders(Borders::ALL))
-                        .style(Style::default().fg(Color::DarkGray));
-                frame.render_widget(paragraph, chunks[2]);
+                render_global_footer(frame, app, chunks[2], help);
 
                 if app.show_quarantine_dialog {
                     quarantine::render_quarantine_dialog(frame, app);
@@ -102,13 +90,50 @@ impl Ui {
             }
 
             AppMode::RateLimitForm => {
-                rate_limit::render_rate_limit_form(frame, app);
+                let chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Length(12),
+                        Constraint::Min(0),
+                        Constraint::Length(2),
+                    ])
+                    .split(frame.area());
+
+                render_ascii_header(frame, app, chunks[0], "Traffic Control", "Anti-DDoS and Rate Limiting");
+                
+                rate_limit::render_rate_limit_form(frame, app, chunks[1]);
+                
+                render_global_footer(frame, app, chunks[2], "[↑↓] Field  [Tab] Protocol  [Space] Unit  [Enter] Apply  [m] Menu");
             }
         }
     }
 }
 
-fn render_ascii_header(frame: &mut Frame, _app: &mut AppState, area: ratatui::layout::Rect, title: &str, description: &str) {
+pub fn render_global_footer(frame: &mut Frame, app: &AppState, area: Rect, help_text: &str) {
+    let msg = if let Some((is_error, msg)) = &app.message {
+        if *is_error {
+            Span::styled(format!(" [ERROR: {}] ", msg), Style::default().fg(Color::Red).bold())
+        } else {
+            Span::styled(format!(" [OK: {}] ", msg), Style::default().fg(Color::Green).bold())
+        }
+    } else {
+        Span::raw("")
+    };
+
+    let footer_text = Line::from(vec![
+        Span::styled(help_text, Style::default().fg(Color::DarkGray)),
+        Span::raw("   "),
+        msg,
+    ]);
+
+    let paragraph = Paragraph::new(footer_text)
+        .alignment(ratatui::layout::Alignment::Center)
+        .block(Block::new().borders(Borders::TOP).style(Style::default().fg(Color::Rgb(60, 60, 60))));
+
+    frame.render_widget(paragraph, area);
+}
+
+fn render_ascii_header(frame: &mut Frame, _app: &mut AppState, area: Rect, title: &str, description: &str) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([

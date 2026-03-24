@@ -3,12 +3,10 @@ use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Style},
-    //text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
 
 use crate::presentation::app::{AppMode, AppState};
-//use crate::presentation::ascii_art::render_logo;
 
 /// Lista de IPs en cuarentena
 pub fn render_quarantine_list(frame: &mut Frame, app: &mut AppState, area: Rect) {
@@ -16,7 +14,7 @@ pub fn render_quarantine_list(frame: &mut Frame, app: &mut AppState, area: Rect)
         let block = Block::new()
             .title(" Quarantined IPs ")
             .borders(Borders::ALL)
-            .style(Style::default().fg(Color::White));
+            .style(Style::default().fg(Color::DarkGray));
         let text = Paragraph::new("No IPs are currently in quarantine.")
             .block(block)
             .alignment(Alignment::Center);
@@ -29,18 +27,19 @@ pub fn render_quarantine_list(frame: &mut Frame, app: &mut AppState, area: Rect)
         .iter()
         .enumerate()
         .map(|(i, ip)| {
-            let style = if i == app.quarantine_index {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(ratatui::style::Modifier::REVERSED)
+            let (prefix, style) = if i == app.quarantine_index {
+                (
+                    ">> ",
+                    Style::default().fg(Color::Cyan).add_modifier(ratatui::style::Modifier::REVERSED),
+                )
             } else {
-                Style::default().fg(Color::Magenta)
+                ("   ", Style::default().fg(Color::White))
             };
-            ListItem::new(format!("  {}  ", ip)).style(style)
+            ListItem::new(format!("{}{}", prefix, ip)).style(style)
         })
         .collect();
 
-    let list = List::new(items).block(Block::new().title(" IPs ").borders(Borders::ALL));
+    let list = List::new(items).block(Block::new().borders(Borders::ALL).style(Style::default().fg(Color::DarkGray)));
     frame.render_widget(list, area);
 }
 
@@ -57,9 +56,9 @@ pub fn render_quarantine_dialog(frame: &mut Frame, app: &AppState) {
     frame.render_widget(Clear, dialog_area);
 
     let block = Block::new()
-        .title(" Add IP to quarantine ")
+        .title(" Quarantine IP ")
         .borders(Borders::ALL)
-        .style(Style::default().bg(Color::Black).fg(Color::Magenta));
+        .style(Style::default().bg(Color::Black).fg(Color::Cyan));
 
     let inner_area = block.inner(dialog_area);
     frame.render_widget(block, dialog_area);
@@ -79,9 +78,9 @@ pub fn render_quarantine_dialog(frame: &mut Frame, app: &AppState) {
     } else {
         app.quarantine_ip_input.clone()
     };
-    let ip_display = Paragraph::new(ip_text)
+    let ip_display = Paragraph::new(format!(" {} ", ip_text))
         .block(Block::new().borders(Borders::ALL))
-        .style(Style::default().fg(Color::Yellow));
+        .style(Style::default().fg(Color::Cyan).add_modifier(ratatui::style::Modifier::REVERSED));
     frame.render_widget(ip_display, chunks[1]);
 }
 

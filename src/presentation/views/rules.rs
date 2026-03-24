@@ -3,23 +3,11 @@ use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Style, Stylize},
-    text::Line,
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
 
 use crate::domain::Rule;
 use crate::presentation::app::{AppMode, AppState};
-
-/// Header de la vista de reglas
-pub fn render_header(frame: &mut Frame, app: &AppState, area: Rect) {
-    let title = format!(" Pathogen - Table: {} ", app.current_table);
-    let block = Block::new()
-        .title(title)
-        .borders(Borders::ALL)
-        .style(Style::default().fg(Color::Cyan));
-
-    frame.render_widget(block, area);
-}
 
 /// Lista de reglas
 pub fn render_rules_list(frame: &mut Frame, app: &mut AppState, area: Rect) {
@@ -30,7 +18,7 @@ pub fn render_rules_list(frame: &mut Frame, app: &mut AppState, area: Rect) {
         let block = Block::new()
             .title(" Rules ")
             .borders(Borders::ALL)
-            .style(Style::default().fg(Color::White));
+            .style(Style::default().fg(Color::DarkGray));
 
         let text = Paragraph::new("No hay reglas disponibles o error al cargar.")
             .block(block)
@@ -44,20 +32,21 @@ pub fn render_rules_list(frame: &mut Frame, app: &mut AppState, area: Rect) {
         .iter()
         .enumerate()
         .map(|(i, rule)| {
-            let style = if i == selected_index {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(ratatui::style::Modifier::REVERSED)
+            let (prefix, style) = if i == selected_index {
+                (
+                    ">> ",
+                    Style::default().fg(Color::Cyan).add_modifier(ratatui::style::Modifier::REVERSED),
+                )
             } else {
-                Style::default().fg(Color::White)
+                ("   ", Style::default().fg(Color::White))
             };
 
-            let content = format_rule(rule);
+            let content = format!("{}{}", prefix, format_rule(rule));
             ListItem::new(content).style(style)
         })
         .collect();
 
-    let list = List::new(items).block(Block::new().title(" Rules ").borders(Borders::ALL));
+    let list = List::new(items).block(Block::new().borders(Borders::ALL).style(Style::default().fg(Color::DarkGray)));
 
     frame.render_widget(list, area);
 }
@@ -96,37 +85,6 @@ pub fn format_rule(rule: &Rule) -> String {
     }
 }
 
-/// Footer de la vista de reglas
-pub fn render_footer(frame: &mut Frame, app: &AppState, area: Rect) {
-    use ratatui::text::Span;
-
-    let help_text = if app.show_block_dialog {
-        " Enter: Confirm | Esc: Cancel "
-    } else {
-        " ↑↓: Navigate | b: Block | d: Delete | m: Menu | q: Exit "
-    };
-
-    let msg = if let Some((is_error, msg)) = &app.message {
-        if *is_error {
-            Span::raw(msg.as_str()).fg(Color::Red)
-        } else {
-            Span::raw(msg.as_str()).fg(Color::Green)
-        }
-    } else {
-        Span::raw("")
-    };
-
-    let paragraph = Paragraph::new(Line::from(vec![
-        Span::raw(help_text),
-        Span::raw(" | "),
-        msg,
-    ]))
-    .block(Block::new().borders(Borders::ALL))
-    .style(Style::default().fg(Color::White));
-
-    frame.render_widget(paragraph, area);
-}
-
 /// Diálogo para bloquear puerto
 pub fn render_block_dialog(frame: &mut Frame, app: &AppState) {
     let area = frame.area();
@@ -142,7 +100,7 @@ pub fn render_block_dialog(frame: &mut Frame, app: &AppState) {
     let block = Block::new()
         .title(" Block Port ")
         .borders(Borders::ALL)
-        .style(Style::default().bg(Color::Black).fg(Color::White));
+        .style(Style::default().bg(Color::Black).fg(Color::Cyan));
 
     let inner_area = block.inner(dialog_area);
     frame.render_widget(block, dialog_area);
@@ -165,9 +123,9 @@ pub fn render_block_dialog(frame: &mut Frame, app: &AppState) {
     } else {
         app.block_port_input.clone()
     };
-    let port_display = Paragraph::new(port_text)
-        .block(Block::new().borders(Borders::ALL).title("Port"))
-        .style(Style::default().fg(Color::Yellow));
+    let port_display = Paragraph::new(format!(" {} ", port_text))
+        .block(Block::new().borders(Borders::ALL).title(" Port "))
+        .style(Style::default().fg(Color::Cyan).add_modifier(ratatui::style::Modifier::REVERSED));
     frame.render_widget(port_display, chunks[1]);
 
     let protocol_text = if app.block_protocol == "tcp" {
@@ -175,11 +133,11 @@ pub fn render_block_dialog(frame: &mut Frame, app: &AppState) {
     } else {
         "TCP [UDP]"
     };
-    let protocol_display = Paragraph::new(protocol_text)
+    let protocol_display = Paragraph::new(format!(" {} ", protocol_text))
         .block(
             Block::new()
                 .borders(Borders::ALL)
-                .title("Protocol (Tab to change)"),
+                .title(" Protocol (Tab) "),
         )
         .style(Style::default().fg(Color::White));
     frame.render_widget(protocol_display, chunks[2]);

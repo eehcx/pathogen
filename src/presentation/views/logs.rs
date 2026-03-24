@@ -12,11 +12,10 @@ use crate::presentation::app::{AppMode, AppState};
 pub fn render_logs_list(frame: &mut Frame, app: &mut AppState, area: Rect) {
     if app.logs.is_empty() {
         let block = Block::new()
-            .title(" Logs ")
             .borders(Borders::ALL)
             .style(Style::default().fg(Color::DarkGray));
 
-        let text = Paragraph::new("No recent purge records found.")
+        let text = Paragraph::new("No recent records found.")
             .block(block)
             .alignment(ratatui::layout::Alignment::Center);
         frame.render_widget(text, area);
@@ -26,10 +25,10 @@ pub fn render_logs_list(frame: &mut Frame, app: &mut AppState, area: Rect) {
     let items: Vec<ListItem> = app
         .logs
         .iter()
-        .map(|log| ListItem::new(log.as_str()).style(Style::default().fg(Color::Red)))
+        .map(|log| ListItem::new(format!("   {}", log)).style(Style::default().fg(Color::Cyan)))
         .collect();
 
-    let list = List::new(items).block(Block::new().title(" Logs ").borders(Borders::ALL));
+    let list = List::new(items).block(Block::new().borders(Borders::ALL).style(Style::default().fg(Color::DarkGray)));
 
     frame.render_widget(list, area);
 }
