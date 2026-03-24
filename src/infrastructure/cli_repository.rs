@@ -190,20 +190,21 @@ impl FirewallRepository for CliFirewallRepository {
         if output.status.success() {
             Ok(())
         } else {
-            Err(String::from_utf8_lossy(&output.stderr).to_string())
+            Err(format!("Backup failed: {}", String::from_utf8_lossy(&output.stderr)))
         }
     }
 
     fn restore_ruleset(&self) -> Result<(), String> {
-        // Direct call to nft to restore
+        // Ejecutamos flush ruleset y luego cargamos el archivo de backup en un script atómico
         let mut cmd = Command::new("sudo");
-        cmd.arg("-n").arg("nft").arg("-f").arg("/tmp/pathogen_backup.nft");
+        cmd.arg("-n").arg("sh").arg("-c").arg("nft flush ruleset && nft -f /tmp/pathogen_backup.nft");
         let output = cmd.output()
             .map_err(|e| format!("Failed to restore backup: {}", e))?;
+            
         if output.status.success() {
             Ok(())
         } else {
-            Err(String::from_utf8_lossy(&output.stderr).to_string())
+            Err(format!("Restore failed: {}", String::from_utf8_lossy(&output.stderr)))
         }
     }
 }

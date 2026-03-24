@@ -111,6 +111,8 @@ impl AppState {
         self.rollback_deadline = None;
         self.refresh_rules();
         self.refresh_quarantine();
+        // Clear any pending IPs that were added during the rollback window
+        self.quarantined_ips = self.repository.get_quarantined_ips();
     }
 
     pub fn refresh_rules(&mut self) {
