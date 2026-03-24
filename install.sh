@@ -5,8 +5,8 @@ set -e
 # Pathogen Installer
 # ==============================================================================
 # This script compiles the Rust project and installs the binary and shell scripts
-# globally. It also configures sudoers to allow the current user to run the
-# necessary nft commands without a password, preventing the TUI from breaking.
+# globally. It sets Linux capabilities (cap_net_admin) on the binary to allow
+# nftables operations without requiring sudo or password.
 # ==============================================================================
 
 echo "Starting Pathogen installation..."
@@ -33,23 +33,23 @@ sudo chmod +x "$SCRIPTS_DIR"/*.sh
 
 sudo cp target/release/pathogen "$INSTALL_DIR/"
 
-SUDOERS_FILE="/etc/sudoers.d/pathogen"
-USER_GROUP=$(id -gn)
+OLD_SUDOERS_FILE="/etc/sudoers.d/pathogen"
+if [ -f "$OLD_SUDOERS_FILE" ]; then
+    echo "Cleaning up old sudoers configuration..."
+    sudo rm -f "$OLD_SUDOERS_FILE"
+fi
 
-echo "Configuring sudoers in $SUDOERS_FILE..."
-sudo bash -c "cat > $SUDOERS_FILE" <<EOF
-# Automatically generated for Pathogen
-%${USER_GROUP} ALL=(root) NOPASSWD: ${SCRIPTS_DIR}/nft_list_rules.sh
-%${USER_GROUP} ALL=(root) NOPASSWD: ${SCRIPTS_DIR}/nft_block_port.sh
-%${USER_GROUP} ALL=(root) NOPASSWD: ${SCRIPTS_DIR}/nft_unblock_port.sh
-%${USER_GROUP} ALL=(root) NOPASSWD: ${SCRIPTS_DIR}/nft_get_logs.sh
-%${USER_GROUP} ALL=(root) NOPASSWD: ${SCRIPTS_DIR}/nft_rate_limit.sh
-%${USER_GROUP} ALL=(root) NOPASSWD: ${SCRIPTS_DIR}/nft_quarantine_ip.sh
-%${USER_GROUP} ALL=(root) NOPASSWD: ${SCRIPTS_DIR}/nft_unquarantine_ip.sh
-%${USER_GROUP} ALL=(root) NOPASSWD: ${SCRIPTS_DIR}/nft_list_quarantine.sh
-EOF
+if ! command -v setcap &> /dev/null; then
+    echo "❌ Error: 'setcap' is not available. Please install libcap2-bin package."
+    echo "   On Debian/Ubuntu: sudo apt install libcap2-bin"
+    exit 1
+fi
 
-sudo chmod 0440 "$SUDOERS_FILE"
+echo "Setting Linux capabilities for pathogen..."
+if ! sudo setcap cap_net_admin+ep "$INSTALL_DIR/pathogen" 2>/dev/null; then
+    echo "⚠️  Warning: Failed to set capabilities. This may happen in container environments."
+    echo "   You may need to run pathogen with elevated privileges manually."
+fi
 
 echo "Installation complete!"
 echo ""
