@@ -36,6 +36,9 @@ pub trait FirewallRepository: Send + Sync {
     /// Get all rate limit rules
     fn get_rate_limit_rules(&self) -> Vec<String>;
 
+    /// Delete a rate limit rule
+    fn delete_rate_limit_rule(&self, rule: &str) -> Result<(), String>;
+
     /// Backup the current ruleset for potential rollback
     fn backup_ruleset(&self) -> Result<(), String>;
 

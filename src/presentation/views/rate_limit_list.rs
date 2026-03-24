@@ -1,4 +1,5 @@
 use crate::presentation::app::{AppState, AppMode};
+use crate::use_cases::firewall_trait::FirewallRepository;
 use ratatui::{
     Frame,
     layout::Rect,
@@ -117,10 +118,10 @@ pub fn handle_rate_limit_list_events(key: crossterm::event::KeyEvent, app: &mut 
                             } else if selected >= app.rate_limit_list.rate_limits.len() {
                                 app.rate_limit_list.state.select(Some(app.rate_limit_list.rate_limits.len() - 1));
                             }
-                            app.message = Some("Rate limit rule deleted successfully".to_string());
+                            app.message = Some((false, "Rate limit rule deleted successfully".to_string()));
                         }
                         Err(e) => {
-                            app.message = Some(format!("Failed to delete rule: {}", e));
+                            app.message = Some((true, format!("Failed to delete rule: {}", e)));
                         }
                     }
                 }

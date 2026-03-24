@@ -183,6 +183,18 @@ impl FirewallRepository for MockFirewallRepository {
         vec!["192.168.1.100".to_string(), "203.0.113.42".to_string()]
     }
 
+    fn get_rate_limit_rules(&self) -> Vec<String> {
+        vec![
+            "tcp dport 8080 limit rate 10/minute".to_string(),
+            "tcp dport 22 limit rate 5/minute".to_string(),
+            "udp dport 53 limit rate 100/minute".to_string(),
+        ]
+    }
+
+    fn delete_rate_limit_rule(&self, _rule: &str) -> Result<(), String> {
+        Ok(())
+    }
+
     fn backup_ruleset(&self) -> Result<(), String> {
         Ok(())
     }
