@@ -225,4 +225,61 @@ impl FirewallRepository for CliFirewallRepository {
             Err(format!("Restore failed: {}", String::from_utf8_lossy(&output.stderr)))
         }
     }
+
+    fn get_rate_limit_rules(&self) -> Vec<String> {
+        // Ejecutar nft list ruleset y filtrar reglas de rate limit
+        let output = match Command::new("sudo")
+            .args(["nft", "list", "ruleset"])
+            .output()
+        {
+            Ok(output) => output,
+            Err(_) => return vec!["Error: Could not execute nft command".to_string()],
+        };
+
+        if !output.status.success() {
+            return vec!["Error: nft command failed".to_string()];
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut rules = Vec::new();
+        
+        // Buscar reglas que contengan "limit rate" o "meter"
+        for line in stdout.lines() {
+            if line.contains("limit rate") || line.contains("meter") {
+                rules.push(line.trim().to_string());
+            }
+        }
+
+        if rules.is_empty() {
+            rules.push("No rate limit rules found".to_string());
+        }
+
+        rules
+    }
+
+    fn delete_rate_limit_rule(&self, rule: &str) -> Result<(), String> {
+        // Extraer el handle de la regla (último número entre corchetes)
+        let handle = rule
+            .split_whitespace()
+            .find(|part| part.starts_with('#'))
+            .map(|h| h.trim_start_matches('#'))
+            .unwrap_or("");
+
+        if handle.is_empty() {
+            return Err("Could not extract rule handle".to_string());
+        }
+
+        // Eliminar la regla usando su handle
+        let output = Command::new("sudo")
+            .args(["nft", "delete", "rule", "filter", "input", "handle", handle])
+            .output()
+            .map_err(|e| format!("Failed to delete rule: {}", e))?;
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(format!("Failed to delete rule: {}", stderr))
+        }
+    }
 }

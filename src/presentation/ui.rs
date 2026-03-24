@@ -116,6 +116,7 @@ impl Ui {
                     .split(frame.area());
 
                 render_ascii_header(frame, app, chunks[0], "Traffic Control", "Manage Rate Limit Rules");
+                rate_limit_list::render_rate_limit_list(frame, app, chunks[1]);
                 
                 rate_limit_list::render_rate_limit_list(frame, app, chunks[1]);
                 

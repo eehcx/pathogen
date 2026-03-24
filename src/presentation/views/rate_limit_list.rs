@@ -18,11 +18,7 @@ impl RateLimitList {
         state.select(Some(0));
         Self {
             state,
-            rate_limits: vec![
-                "TCP:8080 - 10/minute".to_string(),
-                "TCP:22 - 5/minute".to_string(),
-                "UDP:53 - 100/minute".to_string(),
-            ], // Datos de ejemplo
+            rate_limits: Vec::new(), // Se llenará con datos reales
         }
     }
 
