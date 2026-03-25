@@ -15,6 +15,11 @@ pub enum NftablesItem {
         #[serde(flatten)]
         rule: NftRule,
     },
+    #[serde(rename = "set")]
+    Set {
+        #[serde(flatten)]
+        set: NftSet,
+    },
     #[serde(rename = "table")]
     Table(Value),
     #[serde(rename = "chain")]
@@ -38,4 +43,14 @@ pub struct NftRule {
     pub comment: Option<String>,
     #[serde(default)]
     pub expr: Vec<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+pub struct NftSet {
+    pub family: String,
+    pub table: String,
+    pub name: String,
+    #[serde(default)]
+    pub elem: Vec<Value>,
 }
